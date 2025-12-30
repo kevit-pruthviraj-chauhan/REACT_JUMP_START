@@ -1,0 +1,77 @@
+name: Build and Deploy React App to S3 and CloudFront
+
+on:
+  push:
+    branches:
+      - <branch_name>
+
+jobs:
+  deploy-<env_name>-branch:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository code
+      # Usage Example: If ENV_PREFIX is "DEV", secrets should be named like WORKFLOW_DEV_AWS_ACCESS_KEY
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Node.js environment
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "23"
+
+      # Step 3: Enable Corepack for Yarn
+      - name: Enable Corepack
+        run: corepack enable
+
+      # Step 4: Install dependencies
+      - name: Install Dependencies
+        run: yarn
+
+      # Step 5: Dynamically create .env file with GitHub secrets
+      - name: Create .env file dynamically
+        env:
+          ALLMYSECRETS: ${{ toJSON(secrets) }}
+        run: |
+          echo "Creating .env file dynamically..."
+
+          # Filter keys starting with 'DEV_' and exclude unwanted ones
+          echo "$ALLMYSECRETS" | jq -r '
+            to_entries[]
+            | select(.key | startswith("<ENV_PREFIX>_"))
+            | select(.key | ascii_downcase != "github_token")
+            | "\( .key | sub("^<ENV_PREFIX>_"; "") )=\(.value)"
+          ' >> .env
+
+          echo ".env file created successfully."
+
+      # Step 6: Build the React app
+      - name: Build React App
+        env:
+          NODE_OPTIONS: "--openssl-legacy-provider"
+        run: yarn build
+
+      # Step 7: Configure AWS credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.WORKFLOW_<ENV_PREFIX>_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.WORKFLOW_<ENV_PREFIX>_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.WORKFLOW_<ENV_PREFIX>_AWS_REGION }}
+
+      # Step 8: Delete existing build folder in S3
+      - name: Delete all contents in S3 bucket
+        run: aws s3 rm s3://${{ secrets.WORKFLOW_<ENV_PREFIX>_AWS_S3_BUCKET_NAME }}/ --recursive
+
+      # Step 9: Upload new build folder to S3
+      # Note: Check if your build script outputs to './dist' (Vite) or './build' (CRA)
+      - name: Upload build contents to S3
+        run: aws s3 sync ./build s3://${{ secrets.WORKFLOW_<ENV_PREFIX>_AWS_S3_BUCKET_NAME }}/ --exact-timestamps
+
+      # Step 10: Invalidate CloudFront cache
+      - name: Invalidate CloudFront Cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.WORKFLOW_<ENV_PREFIX>_AWS_CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
