@@ -1,0 +1,104 @@
+name: Deploy React App to S3 and CloudFront
+
+on:
+  push:
+    branches:
+      - development
+      - staging
+      - main
+    paths-ignore:
+      - '.github/**'
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # 1. Resolve Environment
+  # ──────────────────────────────────────────────────────────────
+  setup:
+    name: Resolve Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+    steps:
+      - name: Determine environment from branch
+        id: env
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          echo "Branch: $BRANCH"
+
+          if [ "$BRANCH" = "development" ]; then
+            echo "environment=development" >> $GITHUB_OUTPUT
+          elif [ "$BRANCH" = "staging" ]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          elif [ "$BRANCH" = "main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          fi
+
+  # ──────────────────────────────────────────────────────────────
+  # 2. Build & Deploy
+  # ──────────────────────────────────────────────────────────────
+  deploy:
+    name: Build & Deploy
+    needs: [setup]
+    runs-on: ubuntu-latest
+
+    # Locks the job to the correct environment and loads its specific secrets
+    environment: ${{ needs.setup.outputs.environment }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn
+
+      - name: Create .env file dynamically
+        env:
+          ALLMYSECRETS: ${{ toJSON(secrets) }}
+        run: |
+          echo "Creating .env file for ${{ needs.setup.outputs.environment }}..."
+
+          # Extracts all environment-specific secrets, ignoring the standard workflow ones
+          echo "$ALLMYSECRETS" | jq -r '
+            to_entries[]
+            | select(.key | ascii_downcase != "github_token")
+            | select(.key | startswith("AWS_") | not)
+            | "\(.key)=\(.value)"
+          ' >> .env
+
+          echo ".env file created successfully."
+
+      - name: Build React App
+        env:
+          NODE_OPTIONS: "--openssl-legacy-provider"
+        run: yarn build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Delete existing build folder in S3
+        run: aws s3 rm s3://${{ secrets.AWS_S3_BUCKET_NAME }}/ --recursive
+
+      # Note: Check if your build script outputs to './dist' (Vite) or './build' (CRA)
+      - name: Upload build contents to S3
+        run: aws s3 sync ./build s3://${{ secrets.AWS_S3_BUCKET_NAME }}/ --exact-timestamps
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+      - name: Deployment Summary
+        run: echo "Deployment to ${{ needs.setup.outputs.environment }} completed successfully."
