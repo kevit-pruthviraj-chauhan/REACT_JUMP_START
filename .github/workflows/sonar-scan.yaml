@@ -3,27 +3,139 @@ name: Sonar Scan
 on:
   pull_request:
     branches:
-      - <branch1_name>
-      - <branch2_name>
+      - main
+      - milestone-*
   push:
     branches:
-      - <branch1_name>
-      - <branch2_name>
+      - main
+      - milestone-*
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   build:
-    name: Sonar Scanner
+    name: Sonar Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: SonarSource/sonarqube-scan-action@v6
+
+      - name: Sonar Scan
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      - uses: SonarSource/sonarqube-quality-gate-action@v1
+
+      - name: Wait for Sonar
+        run: sleep 15
+
+      - name: Fetch Sonar New Code Metrics
+        if: github.event_name == 'pull_request'
+        id: sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          PROJECT_KEY=$(grep -E '^sonar.projectKey=' sonar-project.properties | cut -d= -f2)
+          RESPONSE=$(curl -s -u $SONAR_TOKEN: "$SONAR_HOST_URL/api/measures/component?component=$PROJECT_KEY&metricKeys=new_bugs,new_vulnerabilities,new_code_smells,new_security_hotspots,new_coverage,new_duplicated_lines_density,new_lines,alert_status,bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density")
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          echo "project_key=$PROJECT_KEY" >> $GITHUB_OUTPUT
+
+      - name: Comment on PR with Sonar Result
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          RESP='${{ steps.sonar.outputs.response }}'
+          PROJECT_KEY='${{ steps.sonar.outputs.project_key }}'
+
+          # Extract metrics with fallbacks
+          NEW_BUGS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="new_bugs") | .period.value // .value // "0"')
+          NEW_VULNS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="new_vulnerabilities") | .period.value // .value // "0"')
+          NEW_SMELLS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="new_code_smells") | .period.value // .value // "0"')
+          NEW_HOTSPOTS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="new_security_hotspots") | .period.value // .value // "0"')
+          NEW_COVERAGE=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="new_coverage") | .period.value // .value // empty')
+          NEW_DUPLICATIONS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="new_duplicated_lines_density") | .period.value // .value // empty')
+          NEW_LINES=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="new_lines") | .period.value // .value // "0"')
+          QG=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="alert_status") | .value // "UNKNOWN"')
+
+          # Fallback to overall metrics if new_* metrics are not available
+          [ -z "$NEW_BUGS" ] || [ "$NEW_BUGS" = "null" ] && NEW_BUGS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="bugs") | .value // "0"')
+          [ -z "$NEW_VULNS" ] || [ "$NEW_VULNS" = "null" ] && NEW_VULNS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="vulnerabilities") | .value // "0"')
+          [ -z "$NEW_SMELLS" ] || [ "$NEW_SMELLS" = "null" ] && NEW_SMELLS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="code_smells") | .value // "0"')
+          [ -z "$NEW_COVERAGE" ] || [ "$NEW_COVERAGE" = "null" ] && NEW_COVERAGE=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="coverage") | .value // empty')
+          [ -z "$NEW_DUPLICATIONS" ] || [ "$NEW_DUPLICATIONS" = "null" ] && NEW_DUPLICATIONS=$(echo "$RESP" | jq -r '.component.measures[] | select(.metric=="duplicated_lines_density") | .value // empty')
+
+          # Determine quality gate status
+          [ "$QG" = "OK" ] && QG_EMOJI="✅" && QG_STATUS="PASSED" || { [ "$QG" = "ERROR" ] && QG_EMOJI="❌" && QG_STATUS="FAILED" || { QG_EMOJI="⚠️" && QG_STATUS="$QG"; }; }
+
+          # Format metrics
+          [ -n "$NEW_COVERAGE" ] && [ "$NEW_COVERAGE" != "null" ] && COVERAGE_DISPLAY="${NEW_COVERAGE}%" || COVERAGE_DISPLAY="N/A"
+          [ -n "$NEW_DUPLICATIONS" ] && [ "$NEW_DUPLICATIONS" != "null" ] && DUPLICATIONS_DISPLAY="${NEW_DUPLICATIONS}%" || DUPLICATIONS_DISPLAY="N/A"
+
+          # Status emojis
+          [ "${NEW_BUGS:-0}" = "0" ] && BUGS_STATUS="✅" || BUGS_STATUS="⚠️"
+          [ "${NEW_VULNS:-0}" = "0" ] && VULNS_STATUS="✅" || VULNS_STATUS="❌"
+          [ "${NEW_HOTSPOTS:-0}" = "0" ] && HOTSPOTS_STATUS="✅" || HOTSPOTS_STATUS="⚠️"
+          [ "${NEW_SMELLS:-0}" = "0" ] && SMELLS_STATUS="✅" || SMELLS_STATUS="⚠️"
+
+          # Build table rows
+          TABLE_ROWS="| Lines of Code | ${NEW_LINES:-0} | - |\n| Bugs | ${NEW_BUGS:-0} | ${BUGS_STATUS} |\n| Vulnerabilities | ${NEW_VULNS:-0} | ${VULNS_STATUS} |"
+          [ "${NEW_HOTSPOTS:-0}" != "0" ] && TABLE_ROWS="${TABLE_ROWS}\n| Security Hotspots | ${NEW_HOTSPOTS:-0} | ${HOTSPOTS_STATUS} |"
+          TABLE_ROWS="${TABLE_ROWS}\n| Code Smells | ${NEW_SMELLS:-0} | ${SMELLS_STATUS} |"
+          [ "$COVERAGE_DISPLAY" != "N/A" ] && TABLE_ROWS="${TABLE_ROWS}\n| Test Coverage | ${COVERAGE_DISPLAY} | - |"
+          [ "$DUPLICATIONS_DISPLAY" != "N/A" ] && TABLE_ROWS="${TABLE_ROWS}\n| Duplications | ${DUPLICATIONS_DISPLAY} | - |"
+
+          # Determine summary message
+          if [ "${NEW_BUGS:-0}" = "0" ] && [ "${NEW_VULNS:-0}" = "0" ] && [ "${NEW_SMELLS:-0}" = "0" ]; then
+            SUMMARY="🎉 **Excellent!** No issues detected in the analyzed code."
+          elif [ "${NEW_VULNS:-0}" != "0" ]; then
+            SUMMARY="⚠️ **Action Required:** ${NEW_VULNS} vulnerabilit(y/ies) detected that need to be addressed."
+          elif [ "${NEW_BUGS:-0}" != "0" ] && [ "${NEW_SMELLS:-0}" != "0" ]; then
+            SUMMARY="⚠️ **Review Needed:** ${NEW_BUGS} bug(s) and ${NEW_SMELLS} code smell(s) detected."
+          elif [ "${NEW_BUGS:-0}" != "0" ]; then
+            SUMMARY="⚠️ **Review Needed:** ${NEW_BUGS} bug(s) detected."
+          elif [ "${NEW_SMELLS:-0}" != "0" ]; then
+            SUMMARY="⚠️ **Review Needed:** ${NEW_SMELLS} code smell(s) detected."
+          else
+            SUMMARY="ℹ️ Please review the analysis results."
+          fi
+
+          # Add duplication warning if high
+          if [ "$DUPLICATIONS_DISPLAY" != "N/A" ]; then
+            DUP_VALUE=$(echo "$NEW_DUPLICATIONS" | cut -d. -f1)
+            if [ "$DUP_VALUE" -gt 3 ]; then
+              SUMMARY="${SUMMARY}\n\n💡 **Note:** Code duplication is at ${DUPLICATIONS_DISPLAY}, consider refactoring to improve maintainability."
+            fi
+          fi
+
+          # Create JSON payload and post comment
+          jq -n \
+            --arg qg_emoji "$QG_EMOJI" \
+            --arg qg_status "$QG_STATUS" \
+            --arg table_rows "$TABLE_ROWS" \
+            --arg summary "$SUMMARY" \
+            --arg url "$SONAR_HOST_URL/dashboard?id=$PROJECT_KEY" \
+            --arg project "$PROJECT_KEY" \
+            '{body: "## \($qg_emoji) SonarQube Analysis Results\n\n### Quality Gate: \($qg_status)\n\n___\n\n### Code Analysis\n\n| Metric | Value | Status |\n|--------|-------|--------|\n\($table_rows)\n\n___\n\n### Summary\n\n\($summary)\n\n[View Full Report on SonarQube](\($url))\n\n<sub>Project: `\($project)` | Analyzed by SonarQube Community Edition</sub>"}' | \
+            curl -s -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: application/json" \
+              https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+              -d @-
+
+      - name: Quality Gate Check
+        uses: SonarSource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
