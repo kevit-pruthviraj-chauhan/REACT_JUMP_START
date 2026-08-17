@@ -1,6 +1,6 @@
-import { all } from '@redux-saga/core/effects'
+import { all } from 'redux-saga/effects'
 import { authSaga } from './auth/sagas'
 
-export default function* rootSaga() {
+export default function* rootSaga(): any {
   yield all([authSaga()])
 }

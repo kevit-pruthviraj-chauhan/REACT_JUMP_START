@@ -1,17 +1,17 @@
-import React from 'react';
-import {ConnectedRouter} from 'connected-react-router'
-import {Provider} from 'react-redux'
-import {routes} from './routes/routes'
-import store, {history} from './redux/stores'
+import React from 'react'
+import { BrowserRouter } from 'react-router-dom'
+import { Provider } from 'react-redux'
+import { AppRoutes } from './routes/routes'
+import store from './redux/stores'
 
 function App() {
-    return (
-        <Provider store={store}>
-            <ConnectedRouter history={history}>
-                {routes}
-            </ConnectedRouter>
-        </Provider>
-    );
+  return (
+    <Provider store={store}>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </Provider>
+  )
 }
 
-export default App;
+export default App

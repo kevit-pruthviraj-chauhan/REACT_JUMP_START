@@ -1,31 +1,26 @@
 import React, { useEffect } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { Route } from 'react-router-dom'
 import { dispatchSignInRequest } from '../redux/stores/auth/actions'
+import { RootState } from '../redux/stores'
 
-export const PrivateRoute = ({
-  component: Component,
-  ...rest
-}: {
-  component: any
-  path: string
+interface PrivateRouteProps {
+  component: React.ComponentType<any>
+}
+
+export const PrivateRoute: React.FC<PrivateRouteProps> = ({
+  component: Component
 }) => {
   const isAuth = useSelector((state: RootState) => state.auth.isAuthenticated)
 
-  return (
-    <Route
-      {...rest}
-      render={props => (isAuth ? <Component {...props} /> : <Redirect />)}
-    />
-  )
+  return isAuth ? <Component /> : <AuthRedirect />
 }
 
-const Redirect = () => {
+const AuthRedirect: React.FC = () => {
   const dispatch = useDispatch()
 
   useEffect(() => {
     dispatch(dispatchSignInRequest())
-  })
+  }, [dispatch])
 
   return <div>Redirecting...</div>
 }

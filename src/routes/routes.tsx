@@ -1,11 +1,11 @@
 import React from 'react'
-import {Route, Switch} from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import Home from '../pages/Home'
 
-export const routes = (
-  <>
-    <Switch>
-      <Route exact path="/" component={Home} />
-    </Switch>
-  </>
-)
+export const AppRoutes: React.FC = () => {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+    </Routes>
+  )
+}

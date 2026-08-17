@@ -1,5 +1,4 @@
 import { call, cancel, fork, put, take } from 'redux-saga/effects'
-import { history } from '../../index'
 import apiServices from '../../../../services/api-service/apiService'
 import { logger } from '../../../../helpers/logger'
 import {
@@ -17,15 +16,15 @@ import {
   SIGN_UP_SUCCESS
 } from '../actions'
 
-export function* signInFlow() {
+export function* signInFlow(): any {
   while (true) {
-    const signInAction = yield take([
+    const signInAction: any = yield take([
       SIGN_IN_EMAIL_REQUEST,
       SIGN_UP_EMAIL_REQUEST
     ])
 
-    let signInTask
-    let OAuthAction
+    let signInTask: any
+    let OAuthAction: any
     switch (signInAction.type) {
       case SIGN_IN_EMAIL_REQUEST:
         signInTask = yield fork(
@@ -39,28 +38,22 @@ export function* signInFlow() {
           signUpROPC,
           signInAction.payload.email,
           signInAction.payload.password
-          // signInAction.payload.firstName
-          // signInAction.payload.lastName,
         )
         break
       case SIGN_IN_GOOGLE_REQUEST:
         signInTask = yield fork(signInGoogle)
-
         break
       case SIGN_IN_FACEBOOK_REQUEST:
         signInTask = yield fork(signInFacebook)
-
         OAuthAction = yield take([OAUTH_SIGN_IN_SUCCESS, OAUTH_SIGN_IN_FAILURE])
 
-        switch (OAuthAction.type) {
-          case OAUTH_SIGN_IN_SUCCESS:
-            logger('OAuth sign in success')
-            break
+        if (OAuthAction.type === OAUTH_SIGN_IN_SUCCESS) {
+          logger('OAuth sign in success')
         }
         break
     }
 
-    const actions = yield take([
+    const actions: any = yield take([
       SIGN_IN_SUCCESS,
       SIGN_IN_FAILURE,
       SIGN_UP_SUCCESS,
@@ -69,12 +62,10 @@ export function* signInFlow() {
     ])
     switch (actions.type) {
       case SIGN_IN_SUCCESS:
-        // Yield init()
         break
       case SIGN_IN_FAILURE:
         break
       case SIGN_UP_SUCCESS:
-        // Yield init()
         break
       case SIGN_UP_FAILURE:
         break
@@ -85,33 +76,34 @@ export function* signInFlow() {
   }
 }
 
-export function* signOutFlow() {
+export function* signOutFlow(): any {
   while (true) {
     yield take(SIGN_OUT_REQUEST)
     yield call(signOut)
     yield put({ type: SIGN_OUT })
-    yield history.push('Explore')
   }
 }
 
-function* signInROPC(email: string, password: string) {
+function* signInROPC(email: string, password: string): any {
   // Call sign in API
 }
 
-function* signUpROPC(email: string, password: string) {
+function* signUpROPC(email: string, password: string): any {
   // Call sign up API
 }
 
-function* signInGoogle() {
+function* signInGoogle(): any {
   // Call sign in Google
 }
 
-function* signInFacebook() {
+function* signInFacebook(): any {
   // Call sign in Facebook
 }
 
-function* signOut() {
+function* signOut(): any {
   try {
     yield call(apiServices.postData, '/logout')
-  } catch (error) {}
+  } catch (error) {
+    // Handle error silently
+  }
 }
