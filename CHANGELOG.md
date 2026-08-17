@@ -1,4 +1,4 @@
-# Dineflow Starter Template - LTS Modernization Changelog
+# React Starter Template - LTS Modernization Changelog
 
 **Date:** August 17, 2026  
 **Purpose:** Modernize template to LTS versions with zero temporary workarounds
@@ -7,7 +7,7 @@
 
 ## 📋 Summary of Changes
 
-This changelog documents the complete modernization of the Dineflow starter template from legacy React/Redux patterns to production-ready LTS versions. All deprecated APIs have been replaced with current standards, and code quality has been significantly improved.
+This changelog documents the complete modernization of the flow starter template from legacy React/Redux patterns to production-ready LTS versions. All deprecated APIs have been replaced with current standards, and code quality has been significantly improved.
 
 ---
 
