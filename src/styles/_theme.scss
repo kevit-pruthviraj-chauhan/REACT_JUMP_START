@@ -1,11 +1,10 @@
-// Configuration
-@import "./node_modules/bootstrap/scss/functions";
-@import "./node_modules/bootstrap/scss/variables";
-@import "./node_modules/bootstrap/scss/mixins";
-@import "./node_modules/bootstrap/scss/utilities";
-
-$theme-colors: (
-        "primary": $black,
-        "danger": $danger
-);
-
+// Bootstrap theme customization
+// Define custom variables BEFORE importing bootstrap
+$primary: #0d6efd;
+$secondary: #6c757d;
+$success: #198754;
+$danger: #dc3545;
+$warning: #ffc107;
+$info: #0dcaf0;
+$light: #f8f9fa;
+$dark: #212529;
